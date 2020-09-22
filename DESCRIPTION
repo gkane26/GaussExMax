@@ -1,0 +1,17 @@
+Package: GaussExMax
+Type: Package
+Title: Expectation Maximization using Gaussian Priors
+Version: 0.0.1
+Author: Gary Kane
+Maintainer: Gary Kane <gakane@bu.edu>
+Description: Fits population parameters from computational models across subjects from an experiments using an expectation maximization algorithm. This package uses Gaussian Priors, so it must be assumed that all parameters will be normally distributed.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Imports: 
+    Matrix,
+    parallel,
+    optimx,
+    pracma,
+    numDeriv
+RoxygenNote: 7.1.1
