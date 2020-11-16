@@ -3,7 +3,6 @@
 #' Run expectation maximization algorithm to fit parameters to each subject of an experiment
 #'
 #' @param dat data.frame; data
-#' @param subs string vector; subject ids
 #' @param mus vector; starting mean parameters
 #' @param sigma vector; starting sd in parameter
 #' @param likfun function; the objective function
@@ -16,6 +15,7 @@
 #' @param parallel logical; if TRUE, will optimize subjects in parallel (within an iteration)
 #' @param return_ind_df logical; if TRUE, will only return a data frame of individual results (parameters and likelihood)
 #' @param verbose logical; if TRUE, will print progress at each iteration
+#' @param ... additional arguments passed to modelfitr::fit_model
 #'
 #' @return if return_ind_df = FALSE, returns a list containing the following fields:
 #' \item{mus}{vector of mean parameters}
@@ -31,9 +31,10 @@
 #' \item{bic}{The group-level bic for the model (only if)}
 #'
 #' @export
-em <- function(dat, subs, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, maxiter = 100L, lower = -Inf, upper = Inf, parallel = F, return_ind_df = F, verbose = T, ...) {
+em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, maxiter = 100L, lower = -Inf, upper = Inf, parallel = F, return_ind_df = F, verbose = T, ...) {
   nparam <- length(mus)
   pnames <- names(mus)
+  subs <- unique(dat$Subject)
 
   ### set up design matrix and sigma matrix ###
   dm <- designmatrix(nparam, length(subs))
@@ -54,7 +55,7 @@ em <- function(dat, subs, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-
     iter <- iter + 1
     oldparams <- newparams
 
-    fit <- estep(dat, subs, mus, sigma, likfun, startx = fit$x, lower = lower, upper = upper, parallel = parallel, ...)
+    fit <- estep(dat, subs, mus, sigma, likfun, startx = fit$x, lower = lower, upper = upper, parallel = parallel, verbose = verbose, ...)
     par_list <- mstep(fit$x, dm, fit$h, sigma)
     mus <- par_list$mus
     sigma <- par_list$sigma
@@ -87,12 +88,11 @@ em <- function(dat, subs, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-
   }
 
   if (return_ind_df) {
-    res_df <- data.frame(Subject = subs, t(fit$x), lik = fit$l, row.names = NULL)
-    if (bic) res_df$bic = bic
-    return(res_df)
+    return(get_ind_df(res))
   } else {
     return(res)
   }
+
 }
 
 estep <- function(dat, subs, mus, sigma, likfun, startx = NULL, lower = -Inf, upper = Inf, parallel = F, verbose = T, ...) {
@@ -107,7 +107,7 @@ estep <- function(dat, subs, mus, sigma, likfun, startx = NULL, lower = -Inf, up
   if (!parallel) {
     for (i in 1:nsub) {
       if (verbose) cat(i, "..", sep = "")
-      sub_fit <- opt_sub(gaussian_prior, startx[, i], lower = lower, upper = upper, mus = mus, sigma = sigma, dat = dat[dat$Subject == subs[i], ], likfun = likfun, ...)
+      sub_fit <- opt_sub(gaussian_prior, startx[, i], lower = lower, upper = upper, mus = mus, var = sigma, dat = dat[dat$Subject == subs[i], ], likfun = likfun, ...)
       x[, i] <- sub_fit$par
       l[i] <- sub_fit$lik
       h[, , i] <- sub_fit$hess
@@ -121,11 +121,9 @@ estep <- function(dat, subs, mus, sigma, likfun, startx = NULL, lower = -Inf, up
     }
     fit_list <- parallel::mcmapply(opt_sub_parallel,
       d_sub = dat_list, stx = startx_list,
-      MoreArgs = c(list(mus = mus), sigma = sigma, likfun = likfun, list(...)),
+      MoreArgs = c(list(mus = mus), var = sigma, likfun = likfun, list(...)),
       mc.preschedule = F, mc.cores = parallel::detectCores() - 1
     )
-    # fit_list = mapply(opt_sub_parallel, d_sub = dat_list, stx = startx_list,
-    #                   MoreArgs = c(list(mus = mus), sigma = sigma, likfun = overharvest_objective, list(...)))
 
     if (length(fit_list) == 0) browser()
     x <- simplify2array(fit_list[1, ])
@@ -172,32 +170,26 @@ mstep <- function(x, dm, h, sigma, full = F) {
   list(mus = mus, sigma = sigma)
 }
 
-opt_sub <- function(obj, start, lower = -Inf, upper = Inf, method = "Nelder-Mead", optControl = list(), obj_args = list(), ...) {
+opt_sub <- function(obj, start, lower = -Inf, upper = Inf, package = "optimx", method = "Nelder-Mead", opt_args = list(), obj_args = list(), ...) {
   it <- 1
-  fit <- optimx::optimx(start, obj, lower = lower, upper = upper, method = method, hessian = F, control = c(optControl, kkt = F), ...)
+  fit <- modelfitr::fit_model(obj,
+                              start,
+                              lower = lower,
+                              upper = upper,
+                              package = package,
+                              method = method,
+                              hessian = TRUE,
+                              opt_args = opt_args,
+                              obj_args = obj_args,
+                              ...)
 
-  while (fit$convcode != 0 & it < 5) {
-    it <- it + 1
-    start <- rnorm(length(start), start, abs(start))
-    new_fit <- optimx::optimx(start, obj, lower = lower, upper = upper, method = method, hessian = F, control = c(optControl, kkt = F), ...)
-    if (new_fit$value[1] < fit$value[1]) fit <- new_fit
-  }
 
-  par <- as.numeric(fit[1:length(start)])
-  val <- fit$value[1]
-  hess <- solve(pracma::hessian(obj, par, ...))
-  if (det(hess) < 0) hess <- solve(numDeriv::hessian(obj, par, ...))
-  if (det(hess) < 0) {
-    cat("\n negative hessian! replacing with NA \n")
-    hess <- matrix(NA, length(start), length(start))
-  }
-
-  return(list(par = par, lik = val, hess = hess))
+  return(list(par = fit$pars, lik = fit$value, hess = fit$hess))
 }
 
-gaussian_prior <- function(param_values, mus, sigma, dat, likfun, ...) {
+gaussian_prior <- function(param_values, mus, var, dat, likfun, ...) {
   d <- length(param_values)
-  lp <- -d / 2 * log(2 * pi) - 1 / 2 * log(Matrix::det(sigma)) - 1 / 2 * t(param_values - mus) %*% solve(sigma) %*% (param_values - mus)
+  lp <- -d / 2 * log(2 * pi) - 1 / 2 * log(Matrix::det(var)) - 1 / 2 * t(param_values - mus) %*% solve(var) %*% (param_values - mus)
   nll <- likfun(param_values, dat, ...)
   map <- nll - lp[1]
   if (is.infinite(map) | is.na(map)) map <- 1e10
@@ -231,7 +223,6 @@ fit_all <- function(dat, subs, obj, start, lower = -Inf, upper = Inf, parallel =
   if (!parallel) {
     for (i in 1:nsub) {
       cat(i, "..", sep = "")
-      sub_fit <- modelfitr::fit_model(obj, start)
       sub_fit <- opt_sub(obj, start, lower = lower, upper = upper, dat = dat[dat$Subject == subs[i], ], ...)
       x[, i] <- sub_fit$par
       l[i] <- sub_fit$lik

@@ -6,7 +6,6 @@
 \usage{
 em(
   dat,
-  subs,
   mus,
   sigma,
   likfun,
@@ -24,8 +23,6 @@ em(
 }
 \arguments{
 \item{dat}{data.frame; data}
-
-\item{subs}{string vector; subject ids}
 
 \item{mus}{vector; starting mean parameters}
 
@@ -50,6 +47,8 @@ em(
 \item{return_ind_df}{logical; if TRUE, will only return a data frame of individual results (parameters and likelihood)}
 
 \item{verbose}{logical; if TRUE, will print progress at each iteration}
+
+\item{...}{additional arguments passed to modelfitr::fit_model}
 }
 \value{
 if return_ind_df = FALSE, returns a list containing the following fields:
