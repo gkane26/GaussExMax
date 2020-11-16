@@ -122,13 +122,17 @@ estep <- function(dat, subs, mus, sigma, likfun, startx = NULL, lower = -Inf, up
     fit_list <- parallel::mcmapply(opt_sub_parallel,
       d_sub = dat_list, stx = startx_list,
       MoreArgs = c(list(mus = mus), var = sigma, likfun = likfun, list(...)),
-      mc.preschedule = F, mc.cores = parallel::detectCores() - 1
+      mc.cores = parallel::detectCores() - 1
     )
 
     if (length(fit_list) == 0) browser()
     x <- simplify2array(fit_list[1, ])
     l <- as.numeric(fit_list[2, ])
     h <- simplify2array(fit_list[3, ])
+    if (class(x) == "numeric") {
+      x <- matrix(x, nrow=1)
+      h <- array(h, dim=c(1, 1, length(x)))
+    }
   }
 
   list(x = x, l = l, h = h)
@@ -161,6 +165,7 @@ mstep <- function(x, dm, h, sigma, full = F) {
   mus <- as.numeric(solve(mean_m1) %*% mean_m2)
 
   ### find sigma ###
+
   sigma <- (x - mus) %*% t(x - mus) / nsub + apply(h, 1:2, mean, na.rm = T)
 
   if (!full) {
@@ -183,8 +188,7 @@ opt_sub <- function(obj, start, lower = -Inf, upper = Inf, package = "optimx", m
                               obj_args = obj_args,
                               ...)
 
-
-  return(list(par = fit$pars, lik = fit$value, hess = fit$hess))
+  return(list(par = fit$pars, lik = fit$value, hess = solve(fit$hess)))
 }
 
 gaussian_prior <- function(param_values, mus, var, dat, likfun, ...) {
