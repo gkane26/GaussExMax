@@ -2,3 +2,5 @@
 
 export(em)
 export(get_ind_df)
+export(ibic)
+export(lml)

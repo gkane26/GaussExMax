@@ -9,9 +9,11 @@
 #' @param bic logical; if TRUE, calculate the group-level bic after fitting model
 #' @param ndata integer; number of observations. only needed to calculate bic
 #' @param emtol numeric; tolerance for convergence
+#' @param rel_and_abs logical; use both relative and absolute tolerance to evaluate convergence
 #' @param maxiter integer; maximum number of iterations. Will stop if maxiter reached without convergence
 #' @param lower numeric vector; lower bounds for parameters
 #' @param upper numeric vector; upper bounds for parameters
+#' @param perturb_start numeric; coefficient of variation to perturb starting optimization parameters
 #' @param parallel logical; if TRUE, will optimize subjects in parallel (within an iteration)
 #' @param return_ind_df logical; if TRUE, will only return a data frame of individual results (parameters and likelihood)
 #' @param verbose logical; if TRUE, will print progress at each iteration
@@ -31,7 +33,7 @@
 #' \item{bic}{The group-level bic for the model (only if)}
 #'
 #' @export
-em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, maxiter = 100L, lower = -Inf, upper = Inf, parallel = F, return_ind_df = F, verbose = T, ...) {
+em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, rel_and_abs = TRUE, maxiter = 100L, lower = -Inf, upper = Inf, perturb_start = 0, parallel = F, return_ind_df = F, verbose = T, ...) {
   nparam <- length(mus)
   pnames <- names(mus)
   subs <- unique(dat$Subject)
@@ -42,32 +44,33 @@ em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, max
 
   ### first iteration ###
   oldparams <- c(mus, Matrix::diag(sigma))
-  fit <- estep(dat, subs, mus, sigma, likfun, lower = lower, upper = upper, parallel = parallel, verbose = verbose, ...)
+  fit <- estep(dat, subs, mus, sigma, likfun, lower = lower, upper = upper, perturb_start = perturb_start, parallel = parallel, verbose = verbose, ...)
   par_list <- mstep(fit$x, dm, fit$h, sigma)
   mus <- par_list$mus
   sigma <- par_list$sigma
   newparams <- c(mus, Matrix::diag(sigma))
-
+  pardiff <- calc_par_diff(oldparams, newparams, rel_and_abs)
 
   ### repeat until convergence ###
   iter <- 1
-  while (max(abs((newparams - oldparams) / oldparams)) > emtol & iter < maxiter) {
+  while (max(pardiff) > emtol & iter < maxiter) {
     iter <- iter + 1
     oldparams <- newparams
 
-    fit <- estep(dat, subs, mus, sigma, likfun, startx = fit$x, lower = lower, upper = upper, parallel = parallel, verbose = verbose, ...)
+    fit <- estep(dat, subs, mus, sigma, likfun, startx = fit$x, lower = lower, upper = upper, perturb_start = perturb_start, parallel = parallel, verbose = verbose, ...)
     par_list <- mstep(fit$x, dm, fit$h, sigma)
     mus <- par_list$mus
     sigma <- par_list$sigma
     newparams <- c(mus, Matrix::diag(sigma))
+    pardiff <- calc_par_diff(oldparams, newparams, rel_and_abs)
 
     if (verbose) {
       cat("\n")
       cat("iter:", iter, "\n")
       cat("mus:", round(mus, 5), "\n")
       cat("sigma:", round(Matrix::diag(sigma), 5), "\n")
-      cat("change:", round(abs((newparams - oldparams) / oldparams), 5), "\n")
-      cat("max:", round(max(abs((newparams - oldparams) / oldparams)), 5), "\n")
+      cat("change:", round(pardiff, 5), "\n")
+      cat("max:", round(max(pardiff), 5), "\n")
       cat("\n")
     }
   }
@@ -83,7 +86,7 @@ em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, max
       warning("ndata needed to calculate bic!")
       res$bic <- NA
     } else {
-      res$bic <- ibic(fit$x, fit$l, fit$h, mus, sigma, ndata)
+      res$bic <- ibic(res, ndata)
     }
   }
 
@@ -95,10 +98,22 @@ em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, max
 
 }
 
-estep <- function(dat, subs, mus, sigma, likfun, startx = NULL, lower = -Inf, upper = Inf, parallel = F, verbose = T, ...) {
+calc_par_diff <- function(oldparams, newparams, rel_and_abs = TRUE) {
+  absdiff <- abs(newparams - oldparams)
+  reldiff <- abs((newparams - oldparams) / oldparams)
+  if (rel_and_abs) {
+    absdiff <- abs(newparams - oldparams)
+  } else {
+    absdiff = rep(Inf, length(reldiff))
+  }
+  mapply(function(x, y) min(x, y), x=reldiff, y=absdiff)
+}
+
+estep <- function(dat, subs, mus, sigma, likfun, startx = NULL, lower = -Inf, upper = Inf, perturb_start = 0, parallel = F, verbose = T, ...) {
   nsub <- length(subs)
   nparam <- length(mus)
   if (is.null(startx)) startx <- matrix(rep(mus, nsub), ncol = nsub)
+  startx = matrix(rnorm(length(startx), startx, abs(startx * perturb_start)), ncol=nsub)
 
   h <- array(0, c(nparam, nparam, nsub))
   l <- numeric(nsub)
@@ -175,7 +190,7 @@ mstep <- function(x, dm, h, sigma, full = F) {
   list(mus = mus, sigma = sigma)
 }
 
-opt_sub <- function(obj, start, lower = -Inf, upper = Inf, package = "optimx", method = "Nelder-Mead", opt_args = list(), obj_args = list(), ...) {
+opt_sub <- function(obj, start, lower = -Inf, upper = Inf, package = "optimx", method = "BFGS", opt_args = list(), obj_args = list(), ...) {
   it <- 1
   fit <- modelfitr::fit_model(obj,
                               start,
@@ -203,19 +218,19 @@ gaussian_prior <- function(param_values, mus, var, dat, likfun, ...) {
 
 designmatrix <- function(npar, nsub) array(diag(npar), c(npar, npar, nsub))
 
-ibic <- function(x, l, h, mus, sigma, ndata) {
-  nHypPar <- length(c(mus, Matrix::diag(sigma)))
-  lml(x, l, h) + nHypPar / 2 * log(ndata)
-}
+# ibic <- function(x, l, h, mus, sigma, ndata) {
+#   nHypPar <- length(c(mus, Matrix::diag(sigma)))
+#   lml(x, l, h) + nHypPar / 2 * log(ndata)
+# }
 
-lml <- function(x, l, h) {
-  # laplace approximation to the log marginal likelihood
-  nparam <- nrow(x)
-  nsub <- ncol(x)
-
-  log_det_hess <- apply(h, 3, function(x) log(det(x)))
-  -nparam / 2 * log(2 * pi) * nsub + sum(l) - sum(log_det_hess) / 2
-}
+# lml <- function(x, l, h) {
+#   # laplace approximation to the log marginal likelihood
+#   nparam <- nrow(x)
+#   nsub <- ncol(x)
+#
+#   log_det_hess <- apply(h, 3, function(x) log(det(x)))
+#   -nparam / 2 * log(2 * pi) * nsub + sum(l) - sum(log_det_hess) / 2
+# }
 
 fit_all <- function(dat, subs, obj, start, lower = -Inf, upper = Inf, parallel = F, ...) {
   nparam <- length(start)
