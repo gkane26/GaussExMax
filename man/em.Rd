@@ -6,16 +6,17 @@
 \usage{
 em(
   dat,
-  subs,
   mus,
   sigma,
   likfun,
   bic = F,
   ndata = NULL,
   emtol = 1e-05,
+  rel_and_abs = TRUE,
   maxiter = 100L,
   lower = -Inf,
   upper = Inf,
+  perturb_start = 0,
   parallel = F,
   return_ind_df = F,
   verbose = T,
@@ -24,8 +25,6 @@ em(
 }
 \arguments{
 \item{dat}{data.frame; data}
-
-\item{subs}{string vector; subject ids}
 
 \item{mus}{vector; starting mean parameters}
 
@@ -39,17 +38,23 @@ em(
 
 \item{emtol}{numeric; tolerance for convergence}
 
+\item{rel_and_abs}{logical; use both relative and absolute tolerance to evaluate convergence}
+
 \item{maxiter}{integer; maximum number of iterations. Will stop if maxiter reached without convergence}
 
 \item{lower}{numeric vector; lower bounds for parameters}
 
 \item{upper}{numeric vector; upper bounds for parameters}
 
+\item{perturb_start}{numeric; coefficient of variation to perturb starting optimization parameters}
+
 \item{parallel}{logical; if TRUE, will optimize subjects in parallel (within an iteration)}
 
 \item{return_ind_df}{logical; if TRUE, will only return a data frame of individual results (parameters and likelihood)}
 
 \item{verbose}{logical; if TRUE, will print progress at each iteration}
+
+\item{...}{additional arguments passed to modelfitr::fit_model}
 }
 \value{
 if return_ind_df = FALSE, returns a list containing the following fields:

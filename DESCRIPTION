@@ -11,7 +11,8 @@ LazyData: true
 Imports: 
     Matrix,
     parallel,
-    optimx,
     pracma,
-    numDeriv
+    numDeriv,
+    modelfitr
+Remotes: gkane26/modelfitr
 RoxygenNote: 7.1.1
