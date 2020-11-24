@@ -38,6 +38,9 @@ em <- function(dat, mus, sigma, likfun, bic = F, ndata = NULL, emtol = 1e-5, rel
   pnames <- names(mus)
   subs <- unique(dat$Subject)
 
+  ### check the length of mus and sigmas
+  if (length(mus) != length(sigma)) stop("mus and sigma must be the same length!")
+
   ### set up design matrix and sigma matrix ###
   dm <- designmatrix(nparam, length(subs))
   sigma <- Matrix::Diagonal(length(sigma), sigma)
